@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="de" data-theme="realistic">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Schiffeversenken Deluxe</title>
+    <link rel="stylesheet" href="styles.css" />
+    <!-- Öffne index.html im Browser, um das Spiel zu starten -->
+  </head>
+  <body>
+    <div id="app">
+      <!-- HUD -->
+      <header class="hud">
+        <h1 class="title">
+          <span class="metal">Schiffeversenken</span>
+          <span class="deluxe">Deluxe</span>
+        </h1>
+        <div class="hud-actions">
+          <button id="btnSound" class="icon-btn" title="Sound an/aus">🔊</button>
+          <button id="btnMenu" class="icon-btn" title="Zurück zum Menü">🏠</button>
+        
+          <a href="impressum.html" class="icon-btn" title="Impressum">§</a></div>
+      </header>
+
+      <div class="water-bg" aria-hidden="true"></div>
+
+      <!-- Startmenü -->
+      <main id="menu" class="screen active">
+        <div class="menu-panel">
+          <h2 class="menu-title">Schiffeversenken Deluxe</h2>
+
+          <!-- 1) START-MENÜ -->
+          <section id="mainMenu" class="menu-section">
+            <h3>🚀 Start</h3>
+            <div class="menu-choice menu-choice--stack">
+              <button id="btnChooseLocal" class="cta">Lokales Spiel</button>
+              <button id="btnChooseMP" class="cta alt">Multiplayer</button>
+              <button id="btnChooseSpectate" class="cta cta-spectate">Zuschauen (Multiplayer)</button>
+            </div>
+          </section>
+
+          <!-- 2) LOKALES SPIEL: AUSWAHL -->
+          <section id="localChoice" class="menu-section setup-panel" hidden>
+            <div class="setup-head">
+              <h3>Lokales Spiel</h3>
+              <button id="btnBackFromLocalChoice" class="ghost" type="button">
+                Zurück
+              </button>
+            </div>
+
+            <div class="menu-choice">
+              <button id="btnLocalChooseAI" class="cta">Gegen Computer</button>
+              <button id="btnLocalChoose2P" class="cta alt">
+                2 Spieler (lokal)
+              </button>
+            </div>
+          </section>
+
+          <!-- 3/4) LOKALES SPIEL: SETUP (AI oder 2P) -->
+          <section id="localSetup" class="menu-section setup-panel" hidden>
+            <div class="setup-head">
+              <h3 id="localSetupTitle">Lokales Spiel – Setup</h3>
+              <button id="btnBackFromLocal" class="ghost" type="button">
+                Zurück
+              </button>
+            </div>
+
+            <label class="field">
+              <span>Spieler 1 Name</span>
+              <input
+                id="nameP1"
+                type="text"
+                placeholder="Admiral Blau"
+                maxlength="16"
+              />
+            </label>
+
+            <label class="field" id="p2Field">
+              <span>Spieler 2 Name</span>
+              <input
+                id="nameP2"
+                type="text"
+                placeholder="Admiral Rot"
+                maxlength="16"
+              />
+            </label>
+
+            <div id="aiDifficulty" class="radio-row">
+              <label><input type="radio" name="ai" value="easy" checked /> Einfach</label>
+              <label><input type="radio" name="ai" value="smart" /> Smart</label>
+            </div>
+
+            <button id="btnLocalStart" class="cta">Spiel starten</button>
+
+            <!-- (bleibt im DOM, wird per JS genutzt / Fallback) -->
+            <button id="btnVsAI" class="cta" hidden>Gegen Computer</button>
+            <button id="btnLocal" class="cta alt" hidden>Lokales 2-Spieler-Spiel</button>
+          </section>
+
+          <!-- 5) MULTIPLAYER: AUSWAHL -->
+          
+          <!-- Zuschauer Setup -->
+          <section id="spectateSetup" class="menu-section setup-panel" hidden>
+            <div class="setup-head">
+              <h3>Multiplayer – Zuschauen</h3>
+              <button id="btnBackFromSpectate" class="ghost" type="button">
+                Zurück
+              </button>
+            </div>
+
+            <label class="field">
+              <span>Lobby-Code</span>
+              <input id="roomCodeSpectate" type="text" placeholder="ABCD12" maxlength="8" />
+            </label>
+
+            <button id="btnSpectateRoom" class="cta cta-spectate" type="button">Zuschauen</button>
+          </section>
+
+<section id="mpChoice" class="menu-section setup-panel" hidden>
+            <div class="setup-head">
+              <h3>Multiplayer</h3>
+              <button id="btnBackFromMpChoice" class="ghost" type="button">
+                Zurück
+              </button>
+            </div>
+
+            <div class="menu-choice">
+              <button id="btnMpChooseCreate" class="cta">Lobby erstellen</button>
+              <button id="btnMpChooseJoin" class="cta alt">Lobby beitreten</button>
+            </div>
+          </section>
+
+          <!-- 6/7) MULTIPLAYER: SETUP (Create oder Join) -->
+          <section id="mpSetup" class="menu-section setup-panel" hidden>
+            <div class="setup-head">
+              <h3 id="mpSetupTitle">Multiplayer – Setup</h3>
+              <button id="btnBackFromMP" class="ghost" type="button">
+                Zurück
+              </button>
+            </div>
+
+            <label class="field">
+              <span>Dein Name</span>
+              <input
+                id="nameOnline"
+                type="text"
+                placeholder="Admiral Online"
+                maxlength="16"
+              />
+            </label>
+
+            <label class="field">
+              <span>Lobby-Code</span>
+              <input
+                id="roomCode"
+                type="text"
+                placeholder="ABCD12"
+                maxlength="8"
+              />
+            </label>
+
+            <p id="mpHintCreate" class="hint" style="margin-top: -4px">
+              Bei „Lobby erstellen“ wird automatisch ein Code generiert, falls leer.
+            </p>
+
+            <button id="btnCreateRoom" class="cta" type="button">Erstellen</button>
+            <button id="btnJoinRoom" class="cta alt" type="button">Beitreten</button>
+          </section>
+        </div>
+      </main>
+
+      <!-- Spiel -->
+      <section id="game" class="screen">
+        <div class="stage">
+          <!-- Multiplayer Lobby Panel (wird nur online angezeigt) -->
+          <div id="mpLobby" class="mp-lobby" hidden>
+            <div class="mp-lobby-inner">
+              <div class="mp-lobby-row">
+                <div class="mp-lobby-code">
+                  Lobby Code: <span id="mpLobbyCode">—</span>
+                </div>
+                <div class="mp-lobby-role" id="mpLobbyRole"></div>
+              </div>
+              <div class="mp-lobby-players" id="mpLobbyPlayers"></div>
+              <div class="mp-lobby-actions">
+                <button id="btnMpReady" class="ghost" type="button">Bereit</button>
+                <button id="btnMpStart" class="cta" type="button" disabled>
+                  Spiel starten
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Eigenes Board -->
+          <div class="side">
+            <h3 id="labelOwn">Dein Board</h3>
+            <div
+              id="ownBoard"
+              class="board"
+              role="grid"
+              aria-label="Eigenes Spielfeld"
+            ></div>
+
+            <!-- EINHEITLICHE WERFT -->
+            <h4 class="dock-title">⚓ Werft – Schiffe zum Platzieren</h4>
+            <div id="shipDock" class="dock" aria-label="Schiffswerft (Drag & Drop)">
+              <!-- Schiffe werden dynamisch in app.js erzeugt -->
+            </div>
+
+            <div class="placement-actions">
+              <button id="btnRandom" class="ghost">Zufallsplatzierung</button>
+              <button id="btnStart" class="cta" disabled>Spiel starten</button>
+            </div>
+            <p class="hint">
+              Ziehe Schiffe aus der Werft aufs Board. Drehen mit <kbd>R</kbd>.
+              Doppelklick entfernt ein platziertes Schiff.
+            </p>
+          </div>
+
+          <div class="divider"></div>
+
+          <!-- Gegnerisches Board -->
+          <div class="side">
+            <h3 id="labelEnemy">Gegnerisches Board</h3>
+            <div
+              id="enemyBoard"
+              class="board"
+              role="grid"
+              aria-label="Gegnerisches Spielfeld"
+            ></div>
+            <div class="game-actions">
+              <button id="btnRestart" class="ghost">Neu starten</button>
+            </div>
+            <div id="status" class="status" aria-live="assertive">
+              Platziere deine Schiffe …
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Übergabe-Overlay (nur lokales Spiel) -->
+      <div id="handover" class="overlay" aria-hidden="true">
+        <div class="handover-card">
+          <div class="ship-silhouette">🚢</div>
+          <h2 id="handoverText">
+            Nächster Spieler – bitte eine beliebige Taste drücken …
+          </h2>
+        </div>
+      </div>
+
+      <!-- Spielende -->
+      <div id="endOverlay" class="overlay" aria-hidden="true">
+        <div class="end-card">
+          <h2 id="endText">Herzlichen Glückwunsch!</h2>
+          <div class="confetti" aria-hidden="true"></div>
+          <button id="btnPlayAgain" class="cta">Nochmal spielen</button>
+        </div>
+      </div>
+
+      <!-- Audio -->
+      <audio id="sfxHit" preload="auto"></audio>
+      <audio id="sfxMiss" preload="auto"></audio>
+      <audio id="sfxSink" preload="auto"></audio>
+      <audio id="sfxWin" preload="auto"></audio>
+    </div>
+
+    <script src="mp-client.js?v=2"></script>
+    <script src="app.js"></script>
+
+<footer class="legal-bar" role="contentinfo">
+  <div class="legal-bar__inner">
+    <span>© 2026 Dein Name</span>
+    <span>Impressum: Musterstraße 1, 12345 Musterstadt</span>
+    <a class="legal-bar__link" href="impressum.html" aria-label="Zum vollständigen Impressum">Vollständiges Impressum</a>
+  </div>
+</footer>
+
+</body>
+</html>
