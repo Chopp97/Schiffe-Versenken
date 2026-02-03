@@ -1,0 +1,17 @@
+[Unit]
+Description=Battleship Deluxe (Node Web + WebSocket)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/battleship-deluxe
+Environment=NODE_ENV=production
+Environment=PORT=8080
+ExecStart=/usr/bin/node /opt/battleship-deluxe/server.js
+Restart=always
+RestartSec=2
+User=www-data
+Group=www-data
+
+[Install]
+WantedBy=multi-user.target
