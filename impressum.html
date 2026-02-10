@@ -10,74 +10,37 @@
     <div id="app">
       <header class="hud">
         <h1 class="title">
-          <span class="metal">Schiffeversenken</span>
-          <span class="deluxe">Deluxe</span>
+          <span class="metal" id="hudMetal" data-i18n="hud_metal">Schiffe versenken</span>
+          <span class="deluxe" id="hudDeluxe" data-i18n="hud_deluxe">Deluxe</span>
         </h1>
         <div class="hud-actions">
-          <a href="index.html" class="icon-btn" title="Zurück zur Startseite">🏠</a>
+          <button id="btnLang" class="icon-btn" data-i18n-attr="title:language">🌐</button>
+          <a href="index.html" class="icon-btn" data-i18n-attr="title:legal_back_home">🏠</a>
         </div>
       </header>
 
       <section class="panel" style="margin: 18px auto; max-width: 980px;">
-        <h2 style="margin-top:0;">Impressum</h2>
-
-        <p><strong>Angaben gemäß § 5 TMG</strong></p>
-        <p>
-          <strong>Dein Name / Firma</strong><br/>
-          Musterstraße 1<br/>
-          12345 Musterstadt<br/>
-          Deutschland
-        </p>
-
-        <p><strong>Kontakt</strong></p>
-        <p>
-          E-Mail: kontakt@example.de<br/>
-          Telefon: +49 000 000000
-        </p>
-
-        <p><strong>Vertreten durch</strong></p>
-        <p>Dein Name</p>
-
-        <p><strong>Umsatzsteuer-ID</strong></p>
-        <p>USt-IdNr.: DE000000000</p>
-
-        <p><strong>Verantwortlich für den Inhalt nach § 18 Abs. 2 MStV</strong></p>
-        <p>
-          Dein Name<br/>
-          Musterstraße 1<br/>
-          12345 Musterstadt
-        </p>
-
-        <hr style="border:0;border-top:1px solid rgba(255,255,255,0.12);margin:18px 0;">
-
-        <p style="opacity:.85; font-size: 13px; line-height: 1.55;">
-          <strong>Haftung für Inhalte</strong><br/>
-          Die Inhalte dieser Seiten wurden mit größter Sorgfalt erstellt. Für die Richtigkeit, Vollständigkeit und
-          Aktualität der Inhalte können wir jedoch keine Gewähr übernehmen.
-        </p>
-
-        <p style="opacity:.85; font-size: 13px; line-height: 1.55;">
-          <strong>Haftung für Links</strong><br/>
-          Unser Angebot enthält Links zu externen Websites Dritter, auf deren Inhalte wir keinen Einfluss haben.
-          Deshalb können wir für diese fremden Inhalte auch keine Gewähr übernehmen.
-        </p>
-
-        <p style="opacity:.85; font-size: 13px; line-height: 1.55;">
-          <strong>Urheberrecht</strong><br/>
-          Die durch die Seitenbetreiber erstellten Inhalte und Werke auf diesen Seiten unterliegen dem deutschen Urheberrecht.
-        </p>
-
-        <p style="opacity:.7; font-size: 12px; margin-bottom:0;">
-          Hinweis: Bitte ersetze die Platzhalter (Name, Adresse, USt-IdNr. usw.) durch deine echten Angaben.
-        </p>
+        <div id="impressumBody"></div>
       </section>
     </div>
+
+    <script src="lang.js?v=5"></script>
   
 <footer class="legal-bar" role="contentinfo">
   <div class="legal-bar__inner">
-    <span>© 2026 Dein Name</span>
-    <span>Impressum: Musterstraße 1, 12345 Musterstadt</span>
-    <a class="legal-bar__link" href="impressum.html" aria-label="Zum vollständigen Impressum">Vollständiges Impressum</a>
+    <span id="footerCopy">© 2026 Dein Name</span>
+    <span id="footerLegalLine">
+      <span id="footerLegalLabel" data-i18n="footer_legal_label">Impressum:</span>
+      <span id="footerLegalAddress">Musterstraße 1, 12345 Musterstadt</span>
+    </span>
+    <a
+      id="footerLegalLink"
+      class="legal-bar__link"
+      href="impressum.html"
+      data-i18n="footer_full_legal"
+      data-i18n-attr="aria-label:footer_full_legal_aria"
+      aria-label="Zum vollständigen Impressum"
+    >Vollständiges Impressum</a>
   </div>
 </footer>
 

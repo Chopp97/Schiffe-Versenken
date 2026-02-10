@@ -3,6 +3,9 @@ und sauberem Fehlerhandling (kein Weiterleiten bei ungültigem Raum) */
 (() => {
   "use strict";
 
+  const T = (key, vars) => (window.I18N ? window.I18N.t(key, vars) : key);
+
+
   document.addEventListener("contextmenu", (e) => e.preventDefault());
 
   // === Multiplayer Flags & DOM-Referenzen ===
@@ -32,6 +35,30 @@ function getPlayerNameById(id) {
   const statusEl = document.getElementById("status");
   const BOARD_SIZE = 10;
 
+  // === Replay/Return-to-Setup ("Nochmal spielen" landet nicht im Hauptmenü) ===
+  const REPLAY_CTX_KEY = "svx_replay_ctx";
+  const REPLAY_RETURN_KEY = "svx_replay_return";
+
+  function saveReplayCtx(ctx) {
+    try {
+      sessionStorage.setItem(REPLAY_CTX_KEY, JSON.stringify(ctx || {}));
+    } catch {}
+  }
+  function readReplayCtx() {
+    try {
+      const raw = sessionStorage.getItem(REPLAY_CTX_KEY);
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
+  }
+  function requestReturnToSetup() {
+    try {
+      sessionStorage.setItem(REPLAY_RETURN_KEY, "1");
+    } catch {}
+    location.reload();
+  }
+
   // Persist (für Lobby-Code Anzeige nach Refresh, falls Reconnect vorhanden)
   const ONLINE_STORE_KEY = "svx_online_last";
 
@@ -53,6 +80,8 @@ function getPlayerNameById(id) {
   }
   function setStatus(txt) {
     if (statusEl) statusEl.textContent = txt;
+    // Spiegel Status auch im Spiel-Balken (falls vorhanden)
+    if (DOM?.barStatus) DOM.barStatus.textContent = txt;
   }
 
   // === Menü-Fehlerbanner (im Menü bleiben!)
@@ -298,6 +327,19 @@ function getPlayerNameById(id) {
   /* DOM */
   const DOM = {
     screens: { menu: qs("#menu"), game: qs("#game"), end: qs("#endOverlay") },
+    // Spiel-Balken
+    gameBar: qs("#gameBar"),
+    barMode: qs("#barMode"),
+    barPhase: qs("#barPhase"),
+    barTurn: qs("#barTurn"),
+    barStatus: qs("#barStatus"),
+    barBtnSound: qs("#barBtnSound"),
+    barBtnRestart: qs("#barBtnRestart"),
+    barBtnMenu: qs("#barBtnMenu"),
+    helpRotate: qs("#helpRotate"),
+    helpRemove: qs("#helpRemove"),
+    helpRandom: qs("#helpRandom"),
+    helpAttack: qs("#helpAttack"),
     own: qs("#ownBoard"),
     enemy: qs("#enemyBoard"),
     dock: qs("#shipDock"),
@@ -322,19 +364,88 @@ function getPlayerNameById(id) {
     lobbyPanel: null,
   };
 
+  // ============================
+  // Spiel-Balken (oben)
+  // ============================
+  function showGameBar(on) {
+    if (!DOM.gameBar) return;
+    DOM.gameBar.hidden = !on;
+  }
+
+  function updateGameBar() {
+    if (!DOM.gameBar) return;
+
+    // Modus
+    if (DOM.barMode) {
+      DOM.barMode.textContent = Online.enabled
+        ? (Online.role === "spectator" ? "👀 Zuschauer" : "🌐 Online")
+        : (State.vsAI ? "🤖 vs KI" : "🎮 Lokal");
+    }
+
+    // Phase
+    if (DOM.barPhase) {
+      DOM.barPhase.textContent =
+        State.phase === "play" ? "🎯 Spiel läuft" : "🛠️ Platzieren";
+    }
+
+    // Kurzanleitung passend zur Phase
+    const placing = State.phase !== "play";
+    if (DOM.helpRotate) DOM.helpRotate.hidden = !placing;
+    if (DOM.helpRemove) DOM.helpRemove.hidden = !placing;
+    if (DOM.helpRandom) DOM.helpRandom.hidden = !placing;
+    if (DOM.helpAttack) DOM.helpAttack.hidden = placing;
+
+    // Turn (nur als kurze Hilfe – Status bleibt Quelle der Wahrheit)
+    if (DOM.barTurn) {
+      if (Online.enabled) {
+        if (Online.role === "spectator") {
+          const t = Online.currentTurnId;
+          DOM.barTurn.textContent = t != null ? `🎯 ${getPlayerNameById(t)} dran` : "🎯 —";
+        } else {
+          DOM.barTurn.textContent = Online.myTurn ? "🎯 Du dran" : "🎯 Gegner dran";
+        }
+      } else {
+        DOM.barTurn.textContent = State.phase === "play"
+          ? `🎯 ${cur().name} dran`
+          : `🧩 ${State.players[State.placingFor]?.name || "—"}`;
+      }
+    }
+
+    // Sound-Icon spiegeln
+    if (DOM.barBtnSound) DOM.barBtnSound.textContent = State.soundOn ? "🔊" : "🔈";
+  }
+
+  // Buttons im Balken
+  DOM.barBtnSound && (DOM.barBtnSound.onclick = () => DOM.btnSound?.click());
+  DOM.barBtnRestart && (DOM.barBtnRestart.onclick = () => location.reload());
+  DOM.barBtnMenu && (DOM.barBtnMenu.onclick = () => location.reload());
+
   /* Übergabe-Overlay (lokaler Modus) */
   const Handover = {
     show(msg, onContinue) {
       if (!DOM.handover) return onContinue?.();
-      DOM.handoverText.textContent =
-        msg || "Nächster Spieler – bitte eine beliebige Taste drücken …";
+      DOM.handoverText.textContent = msg || T("next_player_press");
+
       DOM.handover.classList.add("show");
-      const handler = () => {
+
+      const finish = () => {
         DOM.handover.classList.remove("show");
-        window.removeEventListener("keydown", handler);
+        window.removeEventListener("keydown", onKey);
+        DOM.handover.removeEventListener("click", onClick);
+        DOM.handover.removeEventListener("pointerdown", onClick);
         onContinue?.();
       };
-      window.addEventListener("keydown", handler, { once: true });
+
+      const onKey = () => finish();
+      const onClick = (e) => {
+        // Klick/Tap irgendwo auf dem Overlay soll weitergehen (wichtig für Mobile)
+        e.preventDefault();
+        finish();
+      };
+
+      window.addEventListener("keydown", onKey, { once: true });
+      DOM.handover.addEventListener("click", onClick, { once: true });
+      DOM.handover.addEventListener("pointerdown", onClick, { once: true });
     },
   };
 
@@ -356,6 +467,31 @@ function getPlayerNameById(id) {
   /* Rendering helpers */
   function buildBoard(el) {
     el.innerHTML = "";
+
+    // Koordinaten (A-J / 1-10) – rein visuell, beeinflusst kein Gameplay
+    const letters = "ABCDEFGHIJ".split("");
+
+    const top = document.createElement("div");
+    top.className = "coords coords-top";
+    for (const ch of letters) {
+      const s = document.createElement("span");
+      s.className = "coord";
+      s.textContent = ch;
+      top.appendChild(s);
+    }
+
+    const left = document.createElement("div");
+    left.className = "coords coords-left";
+    for (let i = 1; i <= 10; i++) {
+      const s = document.createElement("span");
+      s.className = "coord";
+      s.textContent = String(i);
+      left.appendChild(s);
+    }
+
+    el.appendChild(top);
+    el.appendChild(left);
+
     for (let y = 0; y < 10; y++)
       for (let x = 0; x < 10; x++) {
         const c = document.createElement("button");
@@ -393,8 +529,84 @@ function getPlayerNameById(id) {
     );
   }
 
+  // === Endscreen: Boards anzeigen (inkl. gegnerische Treffer rot) ===
+  
+  // Multiplayer: vom Server "Reveal" Boards in lokale Board-Struktur übernehmen (für Endscreen)
+  function applyRevealBoards(reveal) {
+    if (!reveal || !Online || !Online.myId) return;
+    const myId = Online.myId; // 1 oder 2
+    const oppId = myId === 1 ? 2 : 1;
+
+    function buildFrom(r) {
+      const b = new Board();
+      if (!r) return b;
+      (r.cells || []).forEach((k) => {
+        const [x, y] = k.split(",").map(Number);
+        if (Number.isFinite(x) && Number.isFinite(y) && inBounds(x, y)) {
+          b.grid[y][x] = "S";
+        }
+      });
+      (r.hits || []).forEach((k) => b.hits.add(k));
+      (r.misses || []).forEach((k) => b.misses.add(k));
+      return b;
+    }
+
+    State.players[0].board = buildFrom(reveal[myId] || reveal[String(myId)]);
+    State.players[1].board = buildFrom(reveal[oppId] || reveal[String(oppId)]);
+  }
+
+function showEndBoardsEnhanced(){
+    const endOwn = document.getElementById("endOwnBoard");
+    const endEnemy = document.getElementById("endEnemyBoard");
+    if (!endOwn || !endEnemy) return;
+
+    // 1) Grundlayout aus dem aktuellen Spiel-DOM übernehmen (damit Koordinaten/Buttons stimmen)
+    endOwn.innerHTML = ownBoardEl ? ownBoardEl.innerHTML : "";
+    endEnemy.innerHTML = enemyBoardEl ? enemyBoardEl.innerHTML : "";
+
+    // 2) Gegner-Schiffe "reveal" + Treffer/Miss korrekt einfärben
+    //    (nutzt vorhandene Helpers: paintPlaced/paintShots)
+    try{
+      paintPlaced(endOwn, State.players[0].board);
+      paintShots(endOwn, State.players[0].board, true);      // ownHit = rot (eingesteckt)
+      paintPlaced(endEnemy, State.players[1].board);          // Schiffe sichtbar
+      paintShots(endEnemy, State.players[1].board, false);    // hit = rot (deine Treffer)
+    }catch(e){
+      // falls irgendwas nicht existiert, wenigstens DOM anzeigen
+      console.warn("Endboards:", e);
+    }
+  }
+
+
+  // UI: unterschiedliche Farben im lokalen 2-Spieler-Modus (ohne Gameplay-Änderungen)
+  function applyLocalBoardColors(activeIndex, mode = "play") {
+    // Nur offline + lokal (nicht vs AI, nicht online)
+    const isLocalTwoPlayer = !Online.enabled && !State.vsAI;
+
+    // Cleanup (auch wichtig beim Wechsel in andere Modi)
+    DOM.own.classList.remove("p1", "p2", "active");
+    DOM.enemy.classList.remove("p1", "p2", "active");
+    document.body.classList.remove("turn-p1", "turn-p2", "placing-p1", "placing-p2");
+
+    if (!isLocalTwoPlayer) return;
+
+    const ownIsP1 = activeIndex === 0;
+    const enemyIsP1 = !ownIsP1;
+
+    // Links (own) = aktueller Spieler, rechts (enemy) = anderer Spieler
+    DOM.own.classList.add(ownIsP1 ? "p1" : "p2", "active");
+    DOM.enemy.classList.add(enemyIsP1 ? "p1" : "p2");
+
+    if (mode === "place") {
+      document.body.classList.add(ownIsP1 ? "placing-p1" : "placing-p2");
+    } else {
+      document.body.classList.add(ownIsP1 ? "turn-p1" : "turn-p2");
+    }
+  }
+
   /* <<< zentraler Refresh bei Zugwechsel / Start >>> */
   function refreshBoardsForTurn() {
+    applyLocalBoardColors(State.turn, "play");
     // Linke Seite: aktueller Spieler sieht sein eigenes Board inkl. Schiffe + Treffer/Fehlschüsse
     paintPlaced(DOM.own, cur().board);
     paintShots(DOM.own, cur().board, true);
@@ -403,8 +615,9 @@ function getPlayerNameById(id) {
     clearPlaced(DOM.enemy);
     paintShots(DOM.enemy, other().board, false);
 
-    DOM.labelOwn.textContent = `${cur().name}: dein Board`;
-    DOM.labelEnemy.textContent = `${other().name}: Gegnerisches Board`;
+    DOM.labelOwn.textContent = T("your_board_named", { name: cur().name });
+    DOM.labelEnemy.textContent = T("enemy_board_named", { name: other().name });
+    updateGameBar();
   }
 
   /* Werft / Dock */
@@ -437,7 +650,7 @@ function getPlayerNameById(id) {
       }
       const label = document.createElement("span");
       label.className = "ship-name";
-      label.textContent = `${def.name} (${def.len})`;
+      label.textContent = `${T("ship_" + def.id)} (${def.len})`;
 
       item.append(ship, label);
 
@@ -478,6 +691,8 @@ function getPlayerNameById(id) {
       cs = rect.width / 10;
     const x = clamp(Math.floor((ev.clientX - rect.left) / cs), 0, 9);
     const y = clamp(Math.floor((ev.clientY - rect.top) / cs), 0, 9);
+    State.dragging.lastX = x;
+    State.dragging.lastY = y;
     const board = currentPlacingBoard();
     const chk = board.canPlace(
       FLEET.find((f) => f.id === State.dragging.id),
@@ -494,9 +709,27 @@ function getPlayerNameById(id) {
   }
   function rotateDuringDrag(ev) {
     if (!State.dragging) return;
+    // Avoid multiple toggles caused by key repeat
+    if (ev.type === "keydown" && ev.repeat) return;
+
     if (ev.key?.toLowerCase() === "r" || ev.type === "contextmenu") {
       ev.preventDefault();
       State.dragging.horiz = !State.dragging.horiz;
+
+      // Re-render ghost immediately (without requiring mouse move)
+      if (typeof State.dragging.lastX === "number" && typeof State.dragging.lastY === "number") {
+        const board = currentPlacingBoard();
+        const chk = board.canPlace(
+          FLEET.find((f) => f.id === State.dragging.id),
+          State.dragging.lastX,
+          State.dragging.lastY,
+          State.dragging.horiz,
+        );
+        qsa(".cell", DOM.own).forEach((c) => c.classList.remove("ghost", "invalid"));
+        chk.cells.forEach((c) =>
+          cell(DOM.own, c.x, c.y)?.classList.add(chk.ok ? "ghost" : "invalid"),
+        );
+      }
     }
   }
   function onDrop(ev) {
@@ -571,9 +804,13 @@ function getPlayerNameById(id) {
     }
 
     const p = State.players[State.placingFor];
-    DOM.labelOwn.textContent = `${p.name}: Board setzen`;
-    DOM.labelEnemy.textContent = `Gegnerisches Board`;
-    DOM.status.textContent = `Platziere deine Schiffe, ${p.name} …`;
+    DOM.labelOwn.textContent = T("placement_own_label", { name: p.name });
+    DOM.labelEnemy.textContent = T("enemy_board");
+    DOM.status.textContent = T("placement_status_named", { name: p.name });
+
+    updateGameBar();
+
+    applyLocalBoardColors(State.placingFor, "place");
 
     // ✅ "Spiel starten"-Button: offline sichtbar, online versteckt (im MP ist Start/Bereit im Lobby-Panel)
     if (DOM.btnStart) DOM.btnStart.style.display = Online.enabled ? "none" : "";
@@ -594,11 +831,14 @@ function getPlayerNameById(id) {
 
   /* Spielstart-Phase (offline) */
   function beginPlay() {
+  const gameBar = document.getElementById('gameBar');
+  if (gameBar) gameBar.style.display = 'none';
     State.phase = "play";
     if (DOM.btnStart) DOM.btnStart.style.display = "none";
     State.gameStarted = true;
     State.turn = 0; // Startspieler: P1
-    DOM.status.textContent = `Spiel läuft – ${cur().name} ist am Zug`;
+    DOM.status.textContent = T("game_running_turn", { name: cur().name });
+    updateGameBar();
     refreshBoardsForTurn();
     enableEnemyShooting(true);
   }
@@ -625,7 +865,7 @@ function getPlayerNameById(id) {
   function sendOnlineReadyIfPossible() {
     const boardCells = getOwnBoardCells();
     if (!boardCells.length || !allPlacedOn(State.players[0].board)) {
-      setStatus("Bitte zuerst alle Schiffe platzieren.");
+      setStatus(T("place_all_ships"));
       return false;
     }
     if (Online.sentReady) return true;
@@ -636,7 +876,7 @@ function getPlayerNameById(id) {
     // markiere lokal als bereit (UI)
     upsertOnlinePlayer(Online.myId, State.players[0].name, true);
     renderLobbyPanel();
-    setStatus("Bereit ✅ – Warte auf Gegner …");
+    setStatus(T("ready_wait"));
     return true;
   }
 
@@ -663,7 +903,7 @@ function getPlayerNameById(id) {
       if (!allPlacedOn(State.players[0].board)) return;
       const nextName = State.players[1].name || "Spieler 2";
       Handover.show(
-        `${nextName} – bitte Taste drücken, um deine Schiffe zu platzieren`,
+        `${T("placing_next", { name: nextName })}`,
         () => {
           enterPlacement({ resetBoards: false, forIndex: 1 });
         },
@@ -672,7 +912,7 @@ function getPlayerNameById(id) {
       if (!allPlacedOn(State.players[1].board)) return;
       const startName = State.players[0].name || "Spieler 1";
       Handover.show(
-        `${startName} – bitte Taste drücken, um das Spiel zu starten`,
+        T("press_to_start", { name: startName }),
         () => {
           beginPlay();
         },
@@ -704,7 +944,7 @@ function getPlayerNameById(id) {
     // === Online: Schuss an Server senden (x,y) ===
     if (Online.enabled) {
       if (!Online.myTurn) {
-        setStatus("Nicht dran – warte auf den Gegner …");
+        setStatus(T("not_your_turn"));
         return;
       }
 
@@ -712,7 +952,7 @@ function getPlayerNameById(id) {
       const enemyBoard = State.players[1].board;
       const key = `${x},${y}`;
       if (enemyBoard.hits.has(key) || enemyBoard.misses.has(key)) {
-        setStatus("Dieses Feld wurde bereits beschossen!");
+        setStatus(T("already_shot"));
         return;
       }
 
@@ -729,14 +969,14 @@ function getPlayerNameById(id) {
     if (r.hit) {
       fx(DOM.enemy, x, y, "hit");
       SND.hit();
-      DOM.status.textContent = r.sunk ? "Schiff versenkt!" : "Treffer!";
+      DOM.status.textContent = r.sunk ? T("sunk") : T("hit");
       if (r.sunk) {
         enemy.revealAround(r.ship);
         paintShots(DOM.enemy, enemy);
         SND.sink();
       }
       if (enemy.allSunk()) {
-        end(`${cur().name} hat gewonnen!`);
+        end(T("win_player", { name: cur().name }));
         return;
       }
       return; // Treffer → gleicher Spieler bleibt am Zug
@@ -752,9 +992,9 @@ function getPlayerNameById(id) {
     } else {
       const next = 1 - State.turn;
       const nextName = State.players[next].name || `Spieler ${next + 1}`;
-      Handover.show(`${nextName} – bitte Taste drücken, du bist am Zug`, () => {
+      Handover.show(`${T("turn_next", { name: nextName })}`, () => {
         State.turn = next;
-        DOM.status.textContent = `${cur().name} ist am Zug`;
+        DOM.status.textContent = T("your_turn", { name: cur().name });
         refreshBoardsForTurn();
       });
     }
@@ -779,7 +1019,7 @@ function getPlayerNameById(id) {
           SND.sink();
         }
         if (b.allSunk()) {
-          end("Computer hat gewonnen");
+          end(T("ai_won"));
           return;
         }
         setTimeout(step, 500);
@@ -787,7 +1027,7 @@ function getPlayerNameById(id) {
         fx(DOM.own, x, y, "splash");
         SND.miss();
         enableEnemyShooting(true);
-        DOM.status.textContent = `${cur().name} ist am Zug`;
+        DOM.status.textContent = T("your_turn", { name: cur().name });
       }
     };
     setTimeout(step, 500);
@@ -796,9 +1036,10 @@ function getPlayerNameById(id) {
   /* Ende / Menü / Buttons */
   function end(txt) {
     DOM.endText.textContent = txt;
+    showEndBoardsEnhanced();
     DOM.screens.end.classList.add("show");
     SND.win();
-    DOM.playAgain.onclick = () => location.reload();
+    DOM.playAgain.onclick = () => requestReturnToSetup();
   }
 
   // ============================
@@ -812,8 +1053,7 @@ function getPlayerNameById(id) {
 
     const panel = document.createElement("div");
     panel.id = "lobbyPanel";
-    panel.style.marginTop = "10px";
-    panel.style.padding = "10px 12px";
+        panel.classList.add("mp-floating-lobby");    panel.style.padding = "10px 12px";
     panel.style.border = "1px solid rgba(255,255,255,.12)";
     panel.style.borderRadius = "12px";
     panel.style.background = "rgba(0,0,0,.25)";
@@ -823,33 +1063,33 @@ function getPlayerNameById(id) {
     panel.innerHTML = `
       <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:8px;">
         <div style="font-weight:800;">
-          Lobby Code: <span id="lobbyCodeTxt" style="letter-spacing:.08em;"></span>
+          ${T("lobby_code")}: <span id="lobbyCodeTxt" style="letter-spacing:.08em;"></span>
         </div>
-        <button id="btnCopyLobby" class="ghost" type="button" style="padding:6px 10px;">Kopieren</button>
+        <button id="btnCopyLobby" class="ghost" type="button" style="padding:6px 10px;">${T("copy")}</button>
       </div>
 
-      <div style="font-weight:700; margin:6px 0;">Spieler</div>
+      <div style="font-weight:700; margin:6px 0;">${T("players")}</div>
       <div id="lobbyPlayers" style="display:grid; gap:6px;"></div>
 
       <div style="display:flex; gap:10px; margin-top:10px; flex-wrap:wrap;">
-        <button id="btnLobbyReady" class="cta" type="button">Bereit</button>
-        <button id="btnLobbyStart" class="cta alt" type="button" disabled>Spiel starten</button>
+        <button id="btnLobbyReady" class="cta" type="button">${T("ready")}</button>
+        <button id="btnLobbyStart" class="cta alt" type="button" disabled>${T("start_game")}</button>
       </div>
 
       <div id="lobbyHint" style="opacity:.85; font-size:.9rem; margin-top:8px;">
-        Spiel startet automatisch, sobald beide bereit sind.
+        ${T("auto_start")}
       </div>
     `;
 
-    status.parentElement.insertBefore(panel, status);
+    document.body.appendChild(panel);
 
     qs("#btnCopyLobby", panel).addEventListener("click", async () => {
       const code = Online.roomCode || "";
       try {
         await navigator.clipboard.writeText(code);
-        setStatus("Lobby-Code kopiert ✅");
+        setStatus(T("lobby_code_copied"));
       } catch {
-        setStatus(`Lobby Code: ${code}`);
+        setStatus(`${T("lobby_code")}: ${code}`);
       }
     });
 
@@ -861,12 +1101,12 @@ function getPlayerNameById(id) {
     qs("#btnLobbyStart", panel).addEventListener("click", () => {
       if (Online.role === "spectator") return;
       if (Online.myId !== 1) {
-        setStatus("Nur der Host kann starten.");
+        setStatus(T("only_host"));
         return;
       }
       Online._autoStarted = true;
       MP.startGame();
-      setStatus("Starte Spiel …");
+      setStatus(T("starting_game"));
     });
 
     DOM.lobbyPanel = panel;
@@ -929,11 +1169,11 @@ function getPlayerNameById(id) {
 
       const nm = document.createElement("div");
       nm.style.fontWeight = "650";
-      nm.textContent = p.name || `Spieler ${p.id}`;
+      nm.textContent = p.name || `Player ${p.id}`;
 
       const st = document.createElement("div");
       st.style.opacity = "0.95";
-      st.textContent = p.ready ? "✅ bereit" : "⏳ nicht bereit";
+      st.textContent = p.ready ? T("ready_yes") : T("ready_no");
 
       row.append(nm, st);
       list.appendChild(row);
@@ -948,7 +1188,7 @@ function getPlayerNameById(id) {
       if (btnReady) btnReady.style.display = "none";
       if (btnStart) btnStart.style.display = "none";
       const hint = qs("#lobbyHint", panel);
-      if (hint) hint.textContent = "Zuschauer-Modus: Du kannst nicht eingreifen.";
+      if (hint) hint.textContent = T("spectator_mode");
       return;
     }
 
@@ -956,7 +1196,7 @@ function getPlayerNameById(id) {
     if (btnReady) {
       btnReady.disabled =
         Online.sentReady || !allPlacedOn(State.players[0].board);
-      btnReady.textContent = Online.sentReady ? "Bereit ✅" : "Bereit";
+      btnReady.textContent = Online.sentReady ? T("ready_done") : T("ready");
     }
 
     // Start: aktivieren wenn beide ready (UI-only; Server startet ggf. automatisch)
@@ -965,15 +1205,15 @@ function getPlayerNameById(id) {
     if (btnStart) {
       btnStart.disabled = !bothReady;
       btnStart.title = bothReady
-        ? "Beide bereit – Spiel startet gleich."
-        : "Warte, bis beide bereit sind.";
+        ? T("both_ready_title")
+        : T("wait_both_ready");
     }
 
     const hint = qs("#lobbyHint", panel);
     if (hint) {
       hint.textContent = bothReady
-        ? "Beide bereit ✅ – Start erfolgt gleich."
-        : "Spiel startet automatisch, sobald beide bereit sind.";
+        ? T("both_ready_hint")
+        : T("auto_start");
     }
   }
 
@@ -987,7 +1227,14 @@ function getPlayerNameById(id) {
     State.aiMode = (
       qsa('input[name="ai"]:checked')[0] || { value: "easy" }
     ).value;
-    State.players[0] = new Player((DOM.nameP1.value || "Spieler 1").trim());
+    const p1 = (DOM.nameP1.value || "Spieler 1").trim();
+    saveReplayCtx({
+      kind: "local",
+      localMode: "ai",
+      nameP1: p1,
+      aiMode: State.aiMode,
+    });
+    State.players[0] = new Player(p1);
     State.players[1] = new Player("Computer");
     switchToGame();
   }
@@ -996,8 +1243,16 @@ function getPlayerNameById(id) {
     Online.enabled = false;
     clearMenuError();
     State.vsAI = false;
-    State.players[0] = new Player((DOM.nameP1.value || "Spieler 1").trim());
-    State.players[1] = new Player((DOM.nameP2.value || "Spieler 2").trim());
+    const p1 = (DOM.nameP1.value || "Spieler 1").trim();
+    const p2 = (DOM.nameP2.value || "Spieler 2").trim();
+    saveReplayCtx({
+      kind: "local",
+      localMode: "local",
+      nameP1: p1,
+      nameP2: p2,
+    });
+    State.players[0] = new Player(p1);
+    State.players[1] = new Player(p2);
     switchToGame();
   }
 
@@ -1028,6 +1283,14 @@ function getPlayerNameById(id) {
     Online.roomCode = finalCode;
     storeLastOnline({ room: finalCode, name, joinMode: "create" });
 
+    // Für "Nochmal spielen" zurück ins MP-Setup (Werte gemerkt)
+    saveReplayCtx({
+      kind: "mp",
+      mpMode: "create",
+      nameOnline: name,
+      roomCode: finalCode,
+    });
+
     MP.connect("", { room: finalCode, name, joinMode: "create" });
   }
 
@@ -1048,6 +1311,14 @@ function getPlayerNameById(id) {
 
     Online.roomCode = finalCode;
     storeLastOnline({ room: finalCode, name, joinMode: "join" });
+
+    // Für "Nochmal spielen" zurück ins MP-Setup (Werte gemerkt)
+    saveReplayCtx({
+      kind: "mp",
+      mpMode: "join",
+      nameOnline: name,
+      roomCode: finalCode,
+    });
 
     MP.connect("", { room: finalCode, name, joinMode: "join" });
   }
@@ -1073,6 +1344,12 @@ function getPlayerNameById(id) {
 
     Online.roomCode = finalCode;
     storeLastOnline({ room: finalCode, name, joinMode: "spectate" });
+
+    // Für "Nochmal spielen" zurück ins Spectate-Setup
+    saveReplayCtx({
+      kind: "spectate",
+      roomCodeSpectate: finalCode,
+    });
 
     MP.connect("", { room: finalCode, name, joinMode: "spectate" });
   }
@@ -1194,9 +1471,9 @@ function storeLastOnline(data) {
       renderLobbyPanel();
 
       if (Online.role === "spectator") {
-        setStatus("Zuschauer verbunden. Warte auf Spielstart / Züge …");
+        setStatus(T("spectator_connected"));
       } else {
-        setStatus("Verbunden. Platziere deine Schiffe und klicke „Bereit“.");
+        setStatus(T("connected_place_ready"));
       }
     });
 
@@ -1271,7 +1548,7 @@ function storeLastOnline(data) {
       refreshBoardsForTurn();
       setStatus(
         Online.myTurn
-          ? "Du beginnst! Schieße auf das gegnerische Feld."
+          ? T("you_start_shoot")
           : "Gegner beginnt. Warte …",
       );
     });
@@ -1376,19 +1653,21 @@ function storeLastOnline(data) {
     });
 
     // === Spielende / Banner + "Nochmal spielen"-Fix ===
-    MP.on("gameOver", ({ youWin, spectator, winner }) => {
+    MP.on("gameOver", ({ youWin, spectator, winner, reveal }) => {
       if (Online.role === "spectator" || spectator) {
-        setStatus(`🏁 Spiel beendet. Gewinner: Spieler ${winner}`);
+        setStatus(T("game_over_winner", { winner }));
         enableEnemyShooting(false);
         return;
       }
-      setStatus(youWin ? "🏆 Du hast gewonnen!" : "❌ Du hast verloren.");
+      setStatus(youWin ? T("you_won") : T("you_lost"));
       const end = document.getElementById("endOverlay");
       const endText = document.getElementById("endText");
       if (end && endText) {
         endText.textContent = youWin
-          ? "Herzlichen Glückwunsch – Sieg!"
-          : "Leider verloren – nächstes Mal klappt’s!";
+          ? T("end_win_text")
+          : T("end_lose_text");
+        applyRevealBoards(reveal);
+        showEndBoardsEnhanced();
         end.classList.add("show");
       }
       SND.win();
@@ -1401,13 +1680,13 @@ function storeLastOnline(data) {
           try {
             MP.state.ws?.close();
           } catch {}
-          location.reload();
+          requestReturnToSetup();
         };
       }
     });
 
     MP.on("opponentLeft", () => {
-      setStatus("Gegner hat das Spiel verlassen.");
+      setStatus(T("opponent_left"));
       enableEnemyShooting(false);
     });
 
@@ -1432,15 +1711,27 @@ function storeLastOnline(data) {
   function switchToGame() {
     qsa(".screen").forEach((s) => s.classList.remove("active"));
     DOM.screens.game.classList.add("active");
+    showGameBar(true);
+    updateGameBar();
     enterPlacement({ resetBoards: true, forIndex: 0 });
   }
 
   DOM.btnMenu && (DOM.btnMenu.onclick = () => location.reload());
+
+  // Klick auf den Spielnamen oben -> zurück zur Hauptseite
+  const __titleHome = document.querySelector('.hud .title');
+  if (__titleHome) {
+    __titleHome.classList.add('mp-title-home');
+    __titleHome.style.cursor = 'pointer';
+    __titleHome.addEventListener('click', () => location.reload());
+  }
+
   DOM.btnRestart && (DOM.btnRestart.onclick = () => location.reload());
   DOM.btnSound &&
     (DOM.btnSound.onclick = () => {
       State.soundOn = !State.soundOn;
       DOM.btnSound.textContent = State.soundOn ? "🔊" : "🔈";
+      updateGameBar();
     });
 
   // ============================
@@ -1455,6 +1746,9 @@ function storeLastOnline(data) {
   function setMenuSection(id) {
     const menu = document.getElementById("menu");
     if (!menu) return;
+
+    // Sobald wir im Menü sind, soll der Spiel-Balken weg sein
+    showGameBar(false);
 
     const sections = qsa("#menu .menu-section");
     sections.forEach((s) => {
@@ -1476,11 +1770,11 @@ function storeLastOnline(data) {
     const aiDiff = document.getElementById("aiDifficulty");
 
     if (mode === "ai") {
-      if (title) title.textContent = "Gegen Computer";
+      if (title) title.textContent = T("local_vs_ai");
       if (p2Field) p2Field.style.display = "none";
       if (aiDiff) aiDiff.style.display = "flex";
     } else {
-      if (title) title.textContent = "2 Spieler (lokal)";
+      if (title) title.textContent = T("local_2p");
       if (p2Field) p2Field.style.display = "";
       if (aiDiff) aiDiff.style.display = "none";
     }
@@ -1495,12 +1789,12 @@ function storeLastOnline(data) {
     const btnJoin = document.getElementById("btnJoinRoom");
 
     if (mode === "create") {
-      if (title) title.textContent = "Lobby erstellen";
+      if (title) title.textContent = T("mp_create");
       if (hintCreate) hintCreate.style.display = "";
       if (btnCreate) btnCreate.style.display = "";
       if (btnJoin) btnJoin.style.display = "none";
     } else {
-      if (title) title.textContent = "Lobby beitreten";
+      if (title) title.textContent = T("mp_join");
       if (hintCreate) hintCreate.style.display = "none";
       if (btnCreate) btnCreate.style.display = "none";
       if (btnJoin) btnJoin.style.display = "";
@@ -1594,4 +1888,38 @@ function storeLastOnline(data) {
     const roomEl = document.getElementById("roomCode");
     if (roomEl && !roomEl.value) roomEl.value = Online.roomCode;
   }
+
+  // === Wenn "Nochmal spielen" gedrückt wurde: direkt in den passenden Setup-Screen springen ===
+  try {
+    if (sessionStorage.getItem(REPLAY_RETURN_KEY) === "1") {
+      sessionStorage.removeItem(REPLAY_RETURN_KEY);
+      const ctx = readReplayCtx();
+      if (ctx && ctx.kind) {
+        if (ctx.kind === "local") {
+          if (typeof ctx.nameP1 === "string") DOM.nameP1.value = ctx.nameP1;
+          if (typeof ctx.nameP2 === "string") DOM.nameP2.value = ctx.nameP2;
+          if (ctx.aiMode) {
+            const r = document.querySelector(`input[name="ai"][value="${ctx.aiMode}"]`);
+            if (r) r.checked = true;
+          }
+          configureLocalSetupFor(ctx.localMode === "local" ? "local" : "ai");
+          setMenuSection("localSetup");
+        } else if (ctx.kind === "mp") {
+          const nm = document.getElementById("nameOnline");
+          const rc = document.getElementById("roomCode");
+          if (nm && typeof ctx.nameOnline === "string") nm.value = ctx.nameOnline;
+          if (rc && typeof ctx.roomCode === "string") rc.value = ctx.roomCode;
+          configureMpSetupFor(ctx.mpMode === "join" ? "join" : "create");
+          setMenuSection("mpSetup");
+        } else if (ctx.kind === "spectate") {
+          const rc = document.getElementById("roomCodeSpectate");
+          if (rc && typeof ctx.roomCodeSpectate === "string") rc.value = ctx.roomCodeSpectate;
+          setMenuSection("spectateSetup");
+        }
+      }
+    }
+  } catch {}
 })();
+
+function hideHowto(){const h=document.getElementById('howto');if(h)h.style.display='none';}
+DOM && DOM.btnStart && DOM.btnStart.addEventListener('click', hideHowto);

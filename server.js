@@ -1,93 +1,72 @@
-// server.js – Battleship Deluxe (self-host ready)
-// - Serves static files from ./public
-// - WebSocket multiplayer on same port (ws://host)
-// - Basic path traversal protection
+// server.js – Self-hosting Version (Ubuntu/Nginx/Systemd)
+const http = require("http");
+const fs = require("fs");
+const path = require("path");
+const WebSocket = require("ws");
 
-'use strict';
-
-const http = require('http');
-const fs = require('fs');
-const path = require('path');
-const WebSocket = require('ws');
-
-const PORT = Number(process.env.PORT || 8080);
-const PUBLIC_DIR = path.join(__dirname, 'public');
-
+const PORT = process.env.PORT || 8080;
 const MIME_TYPES = {
-  '.html': 'text/html; charset=utf-8',
-  '.js': 'application/javascript; charset=utf-8',
-  '.css': 'text/css; charset=utf-8',
-  '.json': 'application/json; charset=utf-8',
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.ico': 'image/x-icon',
-  '.svg': 'image/svg+xml; charset=utf-8',
+  ".html": "text/html; charset=utf-8",
+  ".js": "application/javascript; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".json": "application/json; charset=utf-8",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".ico": "image/x-icon",
 };
 
-function safeResolvePublic(requestPath) {
-  const cleanPath = (requestPath || '/').split('?')[0].split('#')[0];
-  const decoded = decodeURIComponent(cleanPath);
-  const rel = decoded === '/' ? '/index.html' : decoded;
-
-  // Normalize and ensure the result stays inside PUBLIC_DIR
-  const resolved = path.resolve(PUBLIC_DIR, '.' + rel);
-  if (!resolved.startsWith(PUBLIC_DIR + path.sep) && resolved !== path.join(PUBLIC_DIR, 'index.html')) {
-    return null;
-  }
-  return resolved;
-}
-
-function send(res, status, headers, body) {
-  res.writeHead(status, headers);
-  res.end(body);
-}
-
-// === HTTP SERVER (static) ===
+// === HTTP SERVER ===
 const server = http.createServer((req, res) => {
-  if (req.method !== 'GET' && req.method !== 'HEAD') {
-    return send(res, 405, { 'Content-Type': 'text/plain; charset=utf-8' }, 'Method Not Allowed');
+  // --- Static file server (single-page app) ---
+  // Security: prevent path traversal, decode URL safely
+  const urlPathRaw = (req.url || "/").split("?")[0] || "/";
+  let urlPath;
+  try {
+    urlPath = decodeURIComponent(urlPathRaw);
+  } catch {
+    res.writeHead(400, { "Content-Type": "text/plain; charset=utf-8" });
+    return res.end("Bad Request");
   }
 
-  // optional simple health check
-  if (req.url && req.url.split('?')[0] === '/health') {
-    return send(res, 200, { 'Content-Type': 'application/json; charset=utf-8' }, JSON.stringify({ ok: true }));
+  // Basic security headers (fine behind Nginx too)
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("Referrer-Policy", "no-referrer");
+  res.setHeader("X-Frame-Options", "SAMEORIGIN");
+
+  const rootDir = __dirname;
+  const cleanPath = urlPath === "/" ? "/index.html" : urlPath;
+
+  // Resolve to absolute path and ensure it stays inside rootDir
+  const absPath = path.resolve(rootDir, "." + cleanPath);
+  if (!absPath.startsWith(path.resolve(rootDir))) {
+    res.writeHead(403, { "Content-Type": "text/plain; charset=utf-8" });
+    return res.end("Forbidden");
   }
 
-  const filePath = safeResolvePublic(req.url || '/');
-  if (!filePath) {
-    return send(res, 400, { 'Content-Type': 'text/plain; charset=utf-8' }, 'Bad Request');
-  }
+  const ext = path.extname(absPath).toLowerCase();
+  const contentType = MIME_TYPES[ext] || "application/octet-stream";
 
-  const ext = path.extname(filePath).toLowerCase();
-  const contentType = MIME_TYPES[ext] || 'application/octet-stream';
-
-  fs.readFile(filePath, (err, data) => {
+  fs.readFile(absPath, (err, data) => {
     if (err) {
-      if (err.code === 'ENOENT') {
-        // fallback to index.html (handy for deep links)
-        const indexPath = path.join(PUBLIC_DIR, 'index.html');
-        fs.readFile(indexPath, (err2, data2) => {
-          if (err2) {
-            return send(res, 404, { 'Content-Type': 'text/plain; charset=utf-8' }, '404 Not Found');
-          }
-          return send(res, 200, { 'Content-Type': 'text/html; charset=utf-8' }, data2);
-        });
-      } else {
-        return send(res, 500, { 'Content-Type': 'text/plain; charset=utf-8' }, 'Server error');
-      }
+      // SPA fallback: serve index.html for unknown paths (optional)
+      fs.readFile(path.join(rootDir, "index.html"), (err2, data2) => {
+        if (err2) {
+          res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
+          res.end("404 Not Found");
+        } else {
+          res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+          res.end(data2);
+        }
+      });
       return;
     }
 
-    // Cache static assets a bit (HTML not cached)
-    const cacheControl = ext === '.html' ? 'no-cache' : 'public, max-age=3600';
-    const headers = {
-      'Content-Type': contentType,
-      'Cache-Control': cacheControl,
-    };
-
-    if (req.method === 'HEAD') return send(res, 200, headers, '');
-    return send(res, 200, headers, data);
+    // Cache immutable assets lightly (Nginx can do better)
+    if ([".css", ".js"].includes(ext)) {
+      res.setHeader("Cache-Control", "public, max-age=86400");
+    }
+    res.writeHead(200, { "Content-Type": contentType });
+    res.end(data);
   });
 });
 
@@ -104,7 +83,7 @@ function broadcastRoomUpdate(code) {
     name: n,
     ready: !!room.readyById?.[idx + 1],
   }));
-  const payload = JSON.stringify({ type: 'roomUpdate', room: code, players });
+  const payload = JSON.stringify({ type: "roomUpdate", room: code, players });
   const sockets = [...(room.players || []), ...(room.spectators || [])];
   sockets.forEach((p) => {
     if (p.readyState === WebSocket.OPEN) p.send(payload);
@@ -134,7 +113,7 @@ function createBoard(cells) {
 
   for (const c of cells) {
     if (visited.has(c)) continue;
-    const [x, y] = c.split(',').map(Number);
+    const [x, y] = c.split(",").map(Number);
     const stack = [[x, y]];
     const group = [];
     while (stack.length) {
@@ -153,15 +132,26 @@ function createBoard(cells) {
   return board;
 }
 
+
+function serializeBoardForReveal(board) {
+  if (!board) return null;
+  return {
+    cells: Array.from(board.cells || []),
+    hits: Array.from(board.hits || []),
+    misses: Array.from(board.misses || []),
+  };
+}
+
+
 // umgebendes Wasser für versenktes Schiff berechnen
 function getSurroundingWater(coords, hits, misses) {
   const water = new Set();
   for (const c of coords) {
-    const [x, y] = c.split(',').map(Number);
+    const [x, y] = c.split(",").map(Number);
     for (let dy = -1; dy <= 1; dy++) {
       for (let dx = -1; dx <= 1; dx++) {
-        const nx = x + dx;
-        const ny = y + dy;
+        const nx = x + dx,
+          ny = y + dy;
         const key = `${nx},${ny}`;
         if (nx < 0 || nx >= 10 || ny < 0 || ny >= 10) continue;
         if (coords.includes(key)) continue;
@@ -173,27 +163,25 @@ function getSurroundingWater(coords, hits, misses) {
 }
 
 // === Verbindungshandling ===
-wss.on('connection', (ws) => {
-  ws.on('message', (msg) => {
+wss.on("connection", (ws) => {
+  ws.on("message", (msg) => {
+    console.log("📩 Eingehende Nachricht:", msg.toString());
+
     try {
       const data = JSON.parse(msg);
 
       // === 1. Raum erstellen ===
-      if (data.type === 'create') {
-        const code = (data.room || '').toUpperCase();
-        if (!code) {
-          ws.send(JSON.stringify({ type: 'error', msg: 'Kein Raumcode angegeben.' }));
-          return;
-        }
+      if (data.type === "create") {
+        const code = (data.room || "").toUpperCase();
         if (rooms.has(code)) {
-          ws.send(JSON.stringify({ type: 'error', msg: 'Raum existiert bereits.' }));
+          ws.send(JSON.stringify({ type: "error", msg: "Raum existiert bereits." }));
           return;
         }
 
         rooms.set(code, {
           players: [ws],
           spectators: [],
-          names: [data.name || 'Spieler 1'],
+          names: [data.name || "Spieler 1"],
           boards: { 1: null, 2: null },
           readyById: { 1: false, 2: false },
           turn: null,
@@ -201,37 +189,47 @@ wss.on('connection', (ws) => {
 
         ws.room = code;
         ws.playerId = 1;
-        ws.send(JSON.stringify({ type: 'joined', playerId: 1, room: code }));
+
+        console.log(`🆕 Neuer Raum erstellt: ${code}`);
+        ws.send(JSON.stringify({ type: "joined", playerId: 1, room: code }));
         broadcastRoomUpdate(code);
         return;
       }
 
       // === 2. Raum beitreten ===
-      if (data.type === 'join') {
-        const code = (data.room || '').toUpperCase();
+      if (data.type === "join") {
+        const code = (data.room || "").toUpperCase();
         const room = rooms.get(code);
         if (!room || room.players.length >= 2) {
-          ws.send(JSON.stringify({ type: 'error', msg: 'Raum voll oder nicht gefunden.' }));
+          ws.send(
+            JSON.stringify({
+              type: "error",
+              msg: "Raum voll oder nicht gefunden.",
+            }),
+          );
           return;
         }
 
         room.players.push(ws);
-        room.names.push(data.name || 'Spieler 2');
+        room.names.push(data.name || "Spieler 2");
         room.readyById[2] = false;
         ws.room = code;
         ws.playerId = 2;
 
-        ws.send(JSON.stringify({ type: 'joined', playerId: 2, room: code }));
+        console.log(`👥 Spieler beigetreten: ${code}`);
+        ws.send(JSON.stringify({ type: "joined", playerId: 2, room: code }));
+
         broadcastRoomUpdate(code);
         return;
       }
 
+      
       // === 2b. Als Zuschauer beitreten ===
-      if (data.type === 'spectate') {
-        const code = (data.room || '').toUpperCase();
+      if (data.type === "spectate") {
+        const code = (data.room || "").toUpperCase();
         const room = rooms.get(code);
         if (!room) {
-          ws.send(JSON.stringify({ type: 'error', msg: 'Raum nicht gefunden.' }));
+          ws.send(JSON.stringify({ type: "error", msg: "Raum nicht gefunden." }));
           return;
         }
 
@@ -240,31 +238,35 @@ wss.on('connection', (ws) => {
 
         ws.room = code;
         ws.playerId = 0;
-        ws.role = 'spectator';
-        ws.name = data.name || 'Zuschauer';
+        ws.role = "spectator";
+        ws.name = data.name || "Zuschauer";
 
-        ws.send(JSON.stringify({ type: 'joined', playerId: 0, room: code, spectator: true }));
+        console.log(`👀 Zuschauer beigetreten: ${code}`);
+        ws.send(JSON.stringify({ type: "joined", playerId: 0, room: code, spectator: true }));
         broadcastRoomUpdate(code);
 
+        // Falls Spiel schon läuft, Zuschauer über aktuellen Zug informieren
         if (room.turn) {
-          ws.send(JSON.stringify({ type: 'turnUpdate', current: room.turn }));
+          ws.send(JSON.stringify({ type: "turnUpdate", current: room.turn }));
         }
         return;
       }
 
-      // === 3. Spieler Ready Toggle ===
-      if (data.type === 'ready') {
+// === 3. Spieler Ready Toggle ===
+      if (data.type === "ready") {
         const room = rooms.get(ws.room);
-        if (!room || !ws.playerId) return;
+        if (!room) return;
 
         const wantReady = !!data.ready;
         if (wantReady) {
           const cells = data.board || [];
           room.boards[ws.playerId] = createBoard(cells);
           room.readyById[ws.playerId] = true;
+          console.log(`🧭 Spieler ${ws.playerId} ist bereit (${cells.length} Schiffszellen).`);
         } else {
           room.boards[ws.playerId] = null;
           room.readyById[ws.playerId] = false;
+          console.log(`🧭 Spieler ${ws.playerId} ist nicht bereit.`);
         }
 
         broadcastRoomUpdate(ws.room);
@@ -272,45 +274,48 @@ wss.on('connection', (ws) => {
       }
 
       // === 3b. Host startet das Spiel (nur wenn beide bereit sind) ===
-      if (data.type === 'startGame') {
+      if (data.type === "startGame") {
         const room = rooms.get(ws.room);
         if (!room) return;
 
+        // Host-Logik: Spieler 1 ist Host
         if (ws.playerId !== 1) {
-          ws.send(JSON.stringify({ type: 'error', msg: 'Nur der Host kann starten.' }));
+          ws.send(JSON.stringify({ type: "error", msg: "Nur der Host kann starten." }));
           return;
         }
 
         const bothReady = !!room.readyById?.[1] && !!room.readyById?.[2];
         if (!bothReady) {
-          ws.send(JSON.stringify({ type: 'error', msg: 'Spiel kann erst starten, wenn beide bereit sind.' }));
+          ws.send(
+            JSON.stringify({
+              type: "error",
+              msg: "Spiel kann erst starten, wenn beide bereit sind.",
+            }),
+          );
           return;
         }
 
         const first = Math.random() < 0.5 ? 1 : 2;
         room.turn = first;
-
         room.players.forEach((p, idx) => {
           if (p.readyState === WebSocket.OPEN) {
-            p.send(JSON.stringify({ type: 'start', youStart: idx + 1 === first, first }));
+            p.send(JSON.stringify({ type: "start", youStart: idx + 1 === first, first }));
           }
         });
         (room.spectators || []).forEach((p) => {
           if (p.readyState === WebSocket.OPEN) {
-            p.send(JSON.stringify({ type: 'start', spectator: true, first }));
+            p.send(JSON.stringify({ type: "start", spectator: true, first }));
           }
         });
         return;
       }
 
       // === 4. Schusslogik ===
-      if (data.type === 'move') {
+      if (data.type === "move") {
         const room = rooms.get(ws.room);
         if (!room) return;
 
         const shooterId = ws.playerId;
-        if (!shooterId) return; // spectators can't shoot
-
         const targetId = shooterId === 1 ? 2 : 1;
         const shooter = room.boards[shooterId];
         const target = room.boards[targetId];
@@ -318,12 +323,13 @@ wss.on('connection', (ws) => {
 
         if (!target || !shooter) return;
         if (room.turn !== shooterId) {
-          ws.send(JSON.stringify({ type: 'error', msg: 'Nicht dein Zug!' }));
+          ws.send(JSON.stringify({ type: "error", msg: "Nicht dein Zug!" }));
           return;
         }
 
+        // Doppelschüsse blockieren
         if (shooter.shots.has(cell)) {
-          ws.send(JSON.stringify({ type: 'error', msg: 'Feld wurde bereits beschossen!' }));
+          ws.send(JSON.stringify({ type: "error", msg: "Feld wurde bereits beschossen!" }));
           return;
         }
         shooter.shots.add(cell);
@@ -357,14 +363,14 @@ wss.on('connection', (ws) => {
           if (p.readyState === WebSocket.OPEN) {
             p.send(
               JSON.stringify({
-                type: 'moveResult',
+                type: "moveResult",
                 cell,
                 hit,
                 sunk,
                 byMe: isShooter,
                 shooter: shooterId,
                 target: targetId,
-              })
+              }),
             );
           }
         });
@@ -374,72 +380,85 @@ wss.on('connection', (ws) => {
           if (p.readyState === WebSocket.OPEN) {
             p.send(
               JSON.stringify({
-                type: 'moveResult',
+                type: "moveResult",
                 cell,
                 hit,
                 sunk,
                 byMe: false,
                 shooter: shooterId,
                 target: targetId,
-              })
+              }),
             );
           }
         });
 
+        // Spielende prüfen
         const allSunk = target.ships.every((s) => s.hits.size === s.coords.length);
         if (allSunk) {
           room.players.forEach((p, idx) => {
             if (p.readyState === WebSocket.OPEN) {
-              p.send(JSON.stringify({ type: 'gameOver', winner: shooterId, youWin: idx + 1 === shooterId }));
+              p.send(
+                JSON.stringify({
+                  type: "gameOver",
+                  winner: shooterId,
+                  youWin: idx + 1 === shooterId,
+                  reveal: {
+                    1: serializeBoardForReveal(room.boards[1]),
+                    2: serializeBoardForReveal(room.boards[2]),
+                  },
+                }),
+              );
             }
           });
           (room.spectators || []).forEach((p) => {
             if (p.readyState === WebSocket.OPEN) {
-              p.send(JSON.stringify({ type: 'gameOver', winner: shooterId, spectator: true }));
+              p.send(JSON.stringify({ type: "gameOver", winner: shooterId, spectator: true }));
             }
           });
           rooms.delete(ws.room);
           return;
         }
 
+        // Nächster Zug
         const nextTurn = hit ? shooterId : targetId;
         room.turn = nextTurn;
         room.players.forEach((p) => {
           if (p.readyState === WebSocket.OPEN) {
-            p.send(JSON.stringify({ type: 'turnUpdate', current: nextTurn }));
+            p.send(JSON.stringify({ type: "turnUpdate", current: nextTurn }));
           }
         });
         (room.spectators || []).forEach((p) => {
           if (p.readyState === WebSocket.OPEN) {
-            p.send(JSON.stringify({ type: 'turnUpdate', current: nextTurn }));
+            p.send(JSON.stringify({ type: "turnUpdate", current: nextTurn }));
           }
         });
-        return;
       }
-
-      ws.send(JSON.stringify({ type: 'error', msg: 'Unbekannter Nachrichtentyp.' }));
     } catch (e) {
-      ws.send(JSON.stringify({ type: 'error', msg: 'Ungültige Nachricht.' }));
+      console.error("Fehler bei Nachricht:", e);
+      ws.send(JSON.stringify({ type: "error", msg: "Ungültige Nachricht." }));
     }
   });
 
-  ws.on('close', () => {
+  ws.on("close", () => {
     if (ws.room && rooms.has(ws.room)) {
       const room = rooms.get(ws.room);
       const code = ws.room;
       room.players = (room.players || []).filter((p) => p !== ws);
       room.spectators = (room.spectators || []).filter((p) => p !== ws);
-
+      // Name/Ready/Board für den Slot beibehalten, aber als nicht bereit markieren
       if (ws.playerId) {
         room.readyById[ws.playerId] = false;
         room.boards[ws.playerId] = null;
       }
 
+      console.log(`❌ Spieler getrennt von Raum ${code}`);
+
+      // Spieler/Zuschauer informieren
       [...room.players, ...(room.spectators || [])].forEach((p) => {
-        if (p.readyState === WebSocket.OPEN) p.send(JSON.stringify({ type: 'opponentLeft' }));
+        if (p.readyState === WebSocket.OPEN) p.send(JSON.stringify({ type: "opponentLeft" }));
       });
 
-      if (room.players.length === 0 && (room.spectators || []).length === 0) {
+      if ((room.players.length === 0) && ((room.spectators || []).length === 0)) {
         rooms.delete(code);
       } else {
         broadcastRoomUpdate(code);
@@ -450,6 +469,4 @@ wss.on('connection', (ws) => {
 
 server.listen(PORT, () => {
   console.log(`🚀 Server läuft auf Port ${PORT}`);
-  console.log(`   HTTP  -> http://localhost:${PORT}`);
-  console.log(`   WS    -> ws://localhost:${PORT}`);
 });

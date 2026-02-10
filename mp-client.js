@@ -132,7 +132,7 @@
             this.emit("gameOver", { spectator: true, winner: msg.winner });
           } else {
             const youWin = msg.winner === this.state.myId;
-            this.emit("gameOver", { youWin });
+            this.emit("gameOver", { youWin, winner: msg.winner, reveal: msg.reveal });
           }
         } else if (msg.type === "opponentLeft") {
           this.emit("opponentLeft", {});
